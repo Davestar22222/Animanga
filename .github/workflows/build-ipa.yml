@@ -18,6 +18,55 @@ jobs:
       - name: Xcode version
         run: xcodebuild -version
 
+      - name: Prepare project layout (works even if files were uploaded flat)
+        shell: bash
+        run: |
+          set -e
+          test -f project.yml || { echo "project.yml не найден в корне репозитория"; exit 1; }
+          mkdir -p AniManga Config
+          # Все .swift из корня репозитория -> AniManga/
+          find . -maxdepth 1 -name '*.swift' -exec mv {} AniManga/ \;
+          # Каталог ассетов (иконка приложения), если его нет
+          ASSETS=AniManga/Assets.xcassets
+          if [ ! -f "$ASSETS/AppIcon.appiconset/Contents.json" ]; then
+            mkdir -p "$ASSETS/AppIcon.appiconset"
+            echo '{ "info" : { "author" : "xcode", "version" : 1 } }' > "$ASSETS/Contents.json"
+            cat > "$ASSETS/AppIcon.appiconset/Contents.json" <<'JSON'
+          {
+            "images" : [
+              { "filename" : "icon.png", "idiom" : "universal", "platform" : "ios", "size" : "1024x1024" }
+            ],
+            "info" : { "author" : "xcode", "version" : 1 }
+          }
+          JSON
+          fi
+          if [ ! -f "$ASSETS/AppIcon.appiconset/icon.png" ]; then
+            if [ -f icon.png ]; then
+              cp icon.png "$ASSETS/AppIcon.appiconset/icon.png"
+            else
+              python3 - "$ASSETS/AppIcon.appiconset/icon.png" <<'PY'
+          import sys, zlib, struct
+          W = H = 1024
+          raw = bytearray()
+          for y in range(H):
+              raw.append(0)
+              for x in range(W):
+                  t = (x + y) / (2 * (W - 1))
+                  raw += bytes((int(255 - 131 * t), int(77 - 17 * t), int(150 + 80 * t)))
+          def chunk(tag, data):
+              c = struct.pack('>I', len(data)) + tag + data
+              return c + struct.pack('>I', zlib.crc32(tag + data) & 0xffffffff)
+          png = (b'\x89PNG\r\n\x1a\n'
+                 + chunk(b'IHDR', struct.pack('>IIBBBBB', W, H, 8, 2, 0, 0, 0))
+                 + chunk(b'IDAT', zlib.compress(bytes(raw), 6))
+                 + chunk(b'IEND', b''))
+          open(sys.argv[1], 'wb').write(png)
+          PY
+            fi
+          fi
+          echo "--- layout ---"
+          find AniManga -type f | sort
+
       - name: Install XcodeGen
         run: brew install xcodegen
 
@@ -68,4 +117,3 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: AniManga.ipa
-
